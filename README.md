@@ -1,6 +1,6 @@
-# PetCare Journal Backend
+# Crittr Backend
 
-A Python FastAPI backend for the PetCare Journal application, containerized with Docker for easy deployment.
+A Python FastAPI backend for the Crittr application, containerized with Docker for easy deployment.
 
 ## Features
 
@@ -22,12 +22,25 @@ A Python FastAPI backend for the PetCare Journal application, containerized with
 - Docker and Docker Compose
 - Git
 
-### Development Environment
+### Manual Development Setup (Recommended)
+
+1. **Start the database**
+   ```bash
+   docker-compose up postgres
+   ```
+
+2. **Start the backend** (in a new terminal)
+   ```bash
+   source venv/bin/activate
+   uvicorn main:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+### Docker Development Environment (Alternative)
 
 1. **Clone and navigate to backend directory**
    ```bash
    git clone <repository-url>
-   cd backend
+   cd critter-app-BE
    ```
 
 2. **Start development environment**
@@ -90,25 +103,25 @@ docker-compose -f docker-compose.prod.yml down
 
 ### Required Variables
 
-```env
-# Database
-DATABASE_URL=postgresql://user:password@host:port/database
-
-# JWT
-SECRET_KEY=your-super-secret-key
-
-# SMTP (for magic links)
-SMTP_HOST=smtp.gmail.com
-SMTP_USERNAME=your-email@gmail.com
-SMTP_PASSWORD=your-app-password
-SMTP_FROM_EMAIL=noreply@petcarejournal.com
-
-# OpenAI
-OPENAI_API_KEY=your-openai-api-key
-
-# Frontend
-FRONTEND_URL=http://localhost:3000
-```
+   ```env
+   # Database
+   DATABASE_URL=postgresql://crittr_user:crittr_password@localhost:5432/crittr
+   
+   # JWT
+   SECRET_KEY=your-super-secret-key
+   
+   # SMTP (for magic links)
+   SMTP_HOST=smtp.gmail.com
+   SMTP_USERNAME=your-email@gmail.com
+   SMTP_PASSWORD=your-app-password
+   SMTP_FROM_EMAIL=noreply@crittr.app
+   
+   # OpenAI
+   OPENAI_API_KEY=your-openai-api-key
+   
+   # Frontend
+   FRONTEND_URL=http://localhost:3000
+   ```
 
 ### Optional Variables
 
@@ -169,12 +182,18 @@ The application uses the following main entities:
 
 ### Local Development
 
-1. Start the development environment:
+1. **Start the database**
    ```bash
-   ./manage.sh dev-start
+   docker-compose up postgres
    ```
 
-2. The API will be available at http://localhost:8000
+2. **Start the backend** (in a new terminal)
+   ```bash
+   source venv/bin/activate
+   uvicorn main:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+3. The API will be available at http://localhost:8000
 
 ### Production Deployment
 

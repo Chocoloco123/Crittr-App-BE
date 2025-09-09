@@ -1,15 +1,15 @@
-# Docker Compose for PetCare Journal Backend
+# Docker Compose for Crittr Backend
 version: '3.8'
 
 services:
   # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
-    container_name: petcare-postgres
+    container_name: crittr-postgres
     environment:
-      POSTGRES_DB: petjournal
-      POSTGRES_USER: petcare_user
-      POSTGRES_PASSWORD: petcare_password
+      POSTGRES_DB: crittr
+      POSTGRES_USER: crittr_user
+      POSTGRES_PASSWORD: crittr_password
       POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -17,10 +17,10 @@ services:
     ports:
       - "5432:5432"
     networks:
-      - petcare-network
+      - crittr-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U petcare_user -d petjournal"]
+      test: ["CMD-SHELL", "pg_isready -U crittr_user -d crittr"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -30,9 +30,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: petcare-backend
+    container_name: crittr-backend
     environment:
-      DATABASE_URL: postgresql://petcare_user:petcare_password@postgres:5432/petjournal
+      DATABASE_URL: postgresql://crittr_user:crittr_password@postgres:5432/crittr
       SECRET_KEY: your-super-secret-key-change-in-production
       ALGORITHM: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: 30
@@ -40,14 +40,14 @@ services:
       SMTP_PORT: 587
       SMTP_USERNAME: your-email@gmail.com
       SMTP_PASSWORD: your-app-password
-      SMTP_FROM_EMAIL: noreply@petcarejournal.com
+      SMTP_FROM_EMAIL: noreply@crittr.app
       OPENAI_API_KEY: your-openai-api-key
       FRONTEND_URL: http://localhost:3000
-      ENVIRONMENT: production
+      ENVIRONMENT: development
     ports:
       - "8000:8000"
     networks:
-      - petcare-network
+      - crittr-network
     depends_on:
       postgres:
         condition: service_healthy
@@ -63,11 +63,11 @@ services:
   # Redis for caching and sessions (optional)
   redis:
     image: redis:7-alpine
-    container_name: petcare-redis
+    container_name: crittr-redis
     ports:
       - "6379:6379"
     networks:
-      - petcare-network
+      - crittr-network
     restart: unless-stopped
     volumes:
       - redis_data:/data
@@ -80,5 +80,5 @@ volumes:
     driver: local
 
 networks:
-  petcare-network:
+  crittr-network:
     driver: bridge
