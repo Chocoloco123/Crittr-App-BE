@@ -85,6 +85,7 @@ class Pet(Base):
     name = Column(String, nullable=False)
     species = Column(String, nullable=False)  # dog, cat, bird, etc.
     breed = Column(String, nullable=True)
+    sex = Column(String, nullable=True)  # male, female, unknown
     birth_date = Column(DateTime, nullable=True)
     weight = Column(Float, nullable=True)
     color = Column(String, nullable=True)
@@ -184,6 +185,7 @@ class PetCreate(BaseModel):
     name: str
     species: str
     breed: Optional[str] = None
+    sex: Optional[str] = None  # male, female, unknown
     birth_date: Optional[datetime] = None
     weight: Optional[float] = None
     color: Optional[str] = None
@@ -197,6 +199,7 @@ class PetResponse(BaseModel):
     name: str
     species: str
     breed: Optional[str]
+    sex: Optional[str]
     birth_date: Optional[datetime]
     weight: Optional[float]
     color: Optional[str]

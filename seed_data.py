@@ -57,6 +57,7 @@ SAMPLE_PETS = [
         "name": "Buddy",
         "species": "dog",
         "breed": "Golden Retriever",
+        "sex": "male",
         "birth_date": datetime.now() - timedelta(days=365*3),  # 3 years old
         "weight": 75.5,
         "color": "Golden",
@@ -67,6 +68,7 @@ SAMPLE_PETS = [
         "name": "Whiskers",
         "species": "cat", 
         "breed": "Maine Coon",
+        "sex": "female",
         "birth_date": datetime.now() - timedelta(days=365*2),  # 2 years old
         "weight": 12.3,
         "color": "Orange and White",
@@ -78,6 +80,7 @@ SAMPLE_PETS = [
         "name": "Luna",
         "species": "dog",
         "breed": "Border Collie",
+        "sex": "female",
         "birth_date": datetime.now() - timedelta(days=365*4),  # 4 years old
         "weight": 45.2,
         "color": "Black and White",
@@ -89,6 +92,7 @@ SAMPLE_PETS = [
         "name": "Simba",
         "species": "cat",
         "breed": "Persian",
+        "sex": "male",
         "birth_date": datetime.now() - timedelta(days=365*1),  # 1 year old
         "weight": 8.7,
         "color": "White",
@@ -99,6 +103,7 @@ SAMPLE_PETS = [
         "name": "Nemo",
         "species": "fish",
         "breed": "Clownfish",
+        "sex": "male",
         "birth_date": datetime.now() - timedelta(days=180),  # 6 months old
         "weight": 0.1,
         "color": "Orange and White",
@@ -110,6 +115,7 @@ SAMPLE_PETS = [
         "name": "Max",
         "species": "dog",
         "breed": "German Shepherd",
+        "sex": "male",
         "birth_date": datetime.now() - timedelta(days=365*5),  # 5 years old
         "weight": 85.0,
         "color": "Black and Tan",
@@ -121,6 +127,7 @@ SAMPLE_PETS = [
         "name": "Bella",
         "species": "dog",
         "breed": "Labrador Mix",
+        "sex": "female",
         "birth_date": datetime.now() - timedelta(days=365*2),  # 2 years old
         "weight": 55.8,
         "color": "Chocolate",
@@ -131,6 +138,7 @@ SAMPLE_PETS = [
         "name": "Coco",
         "species": "bird",
         "breed": "Cockatiel",
+        "sex": "female",
         "birth_date": datetime.now() - timedelta(days=365*1),  # 1 year old
         "weight": 0.3,
         "color": "Gray and Yellow",
