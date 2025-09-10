@@ -9,10 +9,8 @@ from datetime import datetime, timedelta
 from typing import Optional, List
 import os
 import logging
-import secrets
 import hashlib
 from dotenv import load_dotenv
-import resend
 
 # Load environment variables
 load_dotenv()
@@ -155,15 +153,19 @@ class PetPhoto(Base):
     pet = relationship("Pet", back_populates="pet_photos")
     user = relationship("User", back_populates="pet_photos")
 
-class MagicLink(Base):
-    __tablename__ = "magic_links"
+
+class AdminUser(Base):
+    __tablename__ = "admin_users"
     
     id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, nullable=False, index=True)
-    token = Column(String, nullable=False, unique=True, index=True)
-    expires_at = Column(DateTime, nullable=False)
-    used = Column(Boolean, default=False)
+    email = Column(String, unique=True, index=True, nullable=False)
+    name = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True)
+    last_login = Column(DateTime, nullable=True)
+    login_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 
 # Pydantic Models
 class UserCreate(BaseModel):
@@ -307,15 +309,6 @@ class PhotoResponse(BaseModel):
     class Config:
         from_attributes = True
 
-class MagicLinkRequest(BaseModel):
-    email: EmailStr
-
-class MagicLinkResponse(BaseModel):
-    message: str
-    email: str
-
-class MagicLinkVerify(BaseModel):
-    token: str
 
 # Database dependency
 def get_db():
@@ -342,69 +335,44 @@ async def startup_event():
 async def shutdown_event():
     logger.info("Shutting down Crittr API...")
 
-# Magic Link Authentication Functions
-def generate_magic_link_token() -> str:
-    """Generate a secure random token for magic link"""
-    return secrets.token_urlsafe(32)
 
-def send_magic_link_email(email: str, token: str) -> bool:
-    """Send magic link email using Resend"""
+
+# Admin check function with enhanced security
+def verify_admin_access(email: str, db: Session) -> bool:
+    """
+    Verify admin access with multiple security checks:
+    1. Email exists in admin_users table
+    2. Admin account is active
+    3. Update login tracking
+    """
     try:
-        resend.api_key = os.getenv("RESEND_API_KEY")
+        admin_user = db.query(AdminUser).filter(
+            AdminUser.email == email,
+            AdminUser.is_active == True
+        ).first()
         
-        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-        magic_link_url = f"{frontend_url}/auth/verify?token={token}"
-        
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>Sign in to Crittr</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-                .header {{ background: linear-gradient(135deg, #0ea5e9, #22c55e); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }}
-                .content {{ background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px; }}
-                .button {{ display: inline-block; background: #0ea5e9; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; margin: 20px 0; }}
-                .footer {{ text-align: center; margin-top: 30px; color: #666; font-size: 14px; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>🐾 Welcome to Crittr!</h1>
-                    <p>Your pet's health journey starts here</p>
-                </div>
-                <div class="content">
-                    <h2>Sign in to your account</h2>
-                    <p>Click the button below to securely sign in to your Crittr account:</p>
-                    <a href="{magic_link_url}" class="button">Sign In to Crittr</a>
-                    <p><strong>This link expires in 15 minutes for security.</strong></p>
-                    <p>If you didn't request this sign-in link, you can safely ignore this email.</p>
-                </div>
-                <div class="footer">
-                    <p>© 2024 Crittr - The journaling and tracking app for pet parents</p>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-        
-        params = {
-            "from": "Crittr <noreply@crittr.app>",
-            "to": [email],
-            "subject": "🐾 Sign in to Crittr",
-            "html": html_content,
-        }
-        
-        email = resend.Emails.send(params)
-        logger.info(f"Magic link email sent to {email}")
-        return True
-        
+        if admin_user:
+            # Update login tracking
+            admin_user.last_login = datetime.utcnow()
+            admin_user.login_count += 1
+            db.commit()
+            
+            logger.info(f"Admin access granted to {email} (login #{admin_user.login_count})")
+            return True
+        else:
+            logger.warning(f"Admin access denied for {email} - not found or inactive")
+            return False
+            
     except Exception as e:
-        logger.error(f"Failed to send magic link email: {e}")
+        logger.error(f"Error verifying admin access for {email}: {str(e)}")
         return False
+
+
+# Legacy function for backward compatibility
+def is_admin_user(email: str, db: Session) -> bool:
+    """Legacy admin check - use verify_admin_access for new code"""
+    return verify_admin_access(email, db)
+
 
 # Authentication dependency
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
@@ -441,75 +409,7 @@ async def health_check():
     return {"status": "healthy", "timestamp": datetime.utcnow()}
 
 # Authentication routes
-@app.post("/auth/magic-link", response_model=MagicLinkResponse)
-async def send_magic_link(request: MagicLinkRequest, db: Session = Depends(get_db)):
-    """Send a magic link to the user's email"""
-    email = request.email.lower().strip()
-    
-    # Generate secure token
-    token = generate_magic_link_token()
-    expires_at = datetime.utcnow() + timedelta(minutes=15)
-    
-    # Store magic link in database
-    magic_link = MagicLink(
-        email=email,
-        token=token,
-        expires_at=expires_at
-    )
-    db.add(magic_link)
-    db.commit()
-    
-    # Send email
-    email_sent = send_magic_link_email(email, token)
-    
-    if not email_sent:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to send magic link email"
-        )
-    
-    return MagicLinkResponse(
-        message="Magic link sent successfully",
-        email=email
-    )
 
-@app.post("/auth/verify-magic-link")
-async def verify_magic_link(request: MagicLinkVerify, db: Session = Depends(get_db)):
-    """Verify magic link token and authenticate user"""
-    magic_link = db.query(MagicLink).filter(
-        MagicLink.token == request.token,
-        MagicLink.used == False,
-        MagicLink.expires_at > datetime.utcnow()
-    ).first()
-    
-    if not magic_link:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired magic link"
-        )
-    
-    # Mark magic link as used
-    magic_link.used = True
-    db.commit()
-    
-    # Find or create user
-    user = db.query(User).filter(User.email == magic_link.email).first()
-    if not user:
-        # Create new user
-        user = User(email=magic_link.email, name=magic_link.email.split('@')[0])
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    
-    # TODO: Generate JWT token for session management
-    return {
-        "message": "Authentication successful",
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "name": user.name
-        }
-    }
 
 # User routes
 @app.post("/users/", response_model=UserResponse)
@@ -564,6 +464,13 @@ async def delete_current_user(
                 detail="Email mismatch - cannot delete another user's account"
             )
         
+        # Prevent deletion of demo user
+        if current_user.email == "demo@crittr.app":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Demo user account cannot be deleted"
+            )
+        
         logger.info(f"User {current_user.email} (ID: {current_user.id}) is deleting their account")
         
         # Delete all user-related data (cascade delete should handle this)
@@ -580,9 +487,6 @@ async def delete_current_user(
         
         # Delete pets (this will cascade to pet photos)
         db.query(Pet).filter(Pet.owner_id == current_user.id).delete()
-        
-        # Delete magic links
-        db.query(MagicLink).filter(MagicLink.email == current_user.email).delete()
         
         # Finally, delete the user
         db.delete(current_user)
@@ -605,8 +509,9 @@ async def admin_delete_user(
     db: Session = Depends(get_db)
 ):
     """Admin-only endpoint to delete any user account"""
-    # Check if current user is admin
-    if not current_user.is_admin:
+    # Enhanced admin verification with security checks
+    if not verify_admin_access(current_user.email, db):
+        logger.warning(f"Unauthorized admin access attempt by {current_user.email}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
@@ -620,6 +525,13 @@ async def admin_delete_user(
             detail="User not found"
         )
     
+    # Prevent deletion of demo user even by admin
+    if user_to_delete.email == "demo@crittr.app":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Demo user account cannot be deleted"
+        )
+    
     try:
         logger.info(f"Admin {current_user.email} is deleting user {user_to_delete.email} (ID: {user_id})")
         
@@ -628,7 +540,6 @@ async def admin_delete_user(
         db.query(QuickLog).filter(QuickLog.user_id == user_to_delete.id).delete()
         db.query(JournalEntry).filter(JournalEntry.user_id == user_to_delete.id).delete()
         db.query(Pet).filter(Pet.owner_id == user_to_delete.id).delete()
-        db.query(MagicLink).filter(MagicLink.email == user_to_delete.email).delete()
         
         # Delete the user
         db.delete(user_to_delete)
