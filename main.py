@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Float, ARRAY, JSON
@@ -531,6 +531,118 @@ async def create_user(user: UserCreate, db: Session = Depends(get_db)):
 @app.get("/users/me", response_model=UserResponse)
 async def get_current_user_info(current_user: User = Depends(get_current_user)):
     return current_user
+
+@app.delete("/users/me")
+async def delete_current_user(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Delete the current user and all their data"""
+    try:
+        # Get user identification from headers
+        user_id_header = request.headers.get("X-User-ID")
+        user_email_header = request.headers.get("X-User-Email")
+        
+        if not user_id_header or not user_email_header:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing user identification headers"
+            )
+        
+        # Find the user in the database
+        current_user = db.query(User).filter(User.id == user_id_header).first()
+        if not current_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Verify email matches
+        if current_user.email != user_email_header:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Email mismatch - cannot delete another user's account"
+            )
+        
+        logger.info(f"User {current_user.email} (ID: {current_user.id}) is deleting their account")
+        
+        # Delete all user-related data (cascade delete should handle this)
+        # But let's be explicit for safety
+        
+        # Delete pet photos
+        db.query(PetPhoto).filter(PetPhoto.user_id == current_user.id).delete()
+        
+        # Delete quick logs
+        db.query(QuickLog).filter(QuickLog.user_id == current_user.id).delete()
+        
+        # Delete journal entries
+        db.query(JournalEntry).filter(JournalEntry.user_id == current_user.id).delete()
+        
+        # Delete pets (this will cascade to pet photos)
+        db.query(Pet).filter(Pet.owner_id == current_user.id).delete()
+        
+        # Delete magic links
+        db.query(MagicLink).filter(MagicLink.email == current_user.email).delete()
+        
+        # Finally, delete the user
+        db.delete(current_user)
+        db.commit()
+        
+        return {"message": "User account and all associated data have been permanently deleted"}
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting user {current_user.id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete user account"
+        )
+
+@app.delete("/admin/users/{user_id}")
+async def admin_delete_user(
+    user_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Admin-only endpoint to delete any user account"""
+    # Check if current user is admin
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    
+    # Find the user to delete
+    user_to_delete = db.query(User).filter(User.id == user_id).first()
+    if not user_to_delete:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    try:
+        logger.info(f"Admin {current_user.email} is deleting user {user_to_delete.email} (ID: {user_id})")
+        
+        # Delete all user-related data
+        db.query(PetPhoto).filter(PetPhoto.user_id == user_to_delete.id).delete()
+        db.query(QuickLog).filter(QuickLog.user_id == user_to_delete.id).delete()
+        db.query(JournalEntry).filter(JournalEntry.user_id == user_to_delete.id).delete()
+        db.query(Pet).filter(Pet.owner_id == user_to_delete.id).delete()
+        db.query(MagicLink).filter(MagicLink.email == user_to_delete.email).delete()
+        
+        # Delete the user
+        db.delete(user_to_delete)
+        db.commit()
+        
+        return {"message": f"User {user_to_delete.email} and all associated data have been permanently deleted by admin"}
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting user {user_id} by admin {current_user.email}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete user account"
+        )
 
 # Pet routes
 @app.post("/pets/", response_model=PetResponse)
