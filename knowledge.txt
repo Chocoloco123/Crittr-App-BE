@@ -1,0 +1,120 @@
+Crittr - Pet Health and Journaling Application
+
+Core Purpose
+Crittr is a comprehensive pet care tracking application that helps pet parents monitor their pets' health, activities, and well-being through digital journaling, quick logging, and AI-powered insights.
+
+Main Features
+
+🐾 Pet Management
+- Multi-pet support: Track multiple pets with individual profiles
+- Pet profiles: Store species, breed, sex, birth date, weight, color, microchip ID
+- Pet avatars: Upload and manage pet photos with positioning data
+- Pet-specific tracking: All activities and logs are tied to specific pets
+
+📝 Digital Journal System
+- Rich text journal entries: Detailed daily activity recording
+- Multiple entry types: Feeding, health, training, grooming, vet visits, etc.
+- Media attachments: Add photos and videos to entries
+- Tagging system: Organize entries with custom tags
+- Search functionality: Find entries quickly across all pet data
+- Date-based organization: Chronological entry management
+
+⚡ One-Tap Quick Logging
+- Instant activity logging: Quick buttons for common activities
+- Predefined activities: Feeding, water, walks, medication, training, grooming
+- Fast timestamps: Automatic time tracking for activities
+- Quick notes: Add brief notes to quick logs
+
+📊 Health Analytics & Trends
+- Weight tracking: Visualize weight trends over time
+- Medication adherence: Track medication schedules and compliance
+- Symptom patterns: Monitor recurring health issues
+- Interactive charts: Visual data representation
+- Health insights: AI-powered analysis of pet health data
+
+🔔 Smart Reminders
+- Custom reminders: Set up feeding times, medication schedules, vet appointments
+- Flexible scheduling: One-time or recurring reminders
+- Notification system: Stay on top of pet care tasks
+- Reminder management: Edit, delete, or mark reminders as complete
+
+🤖 AI Assistant
+- OpenAI integration: AI-powered health summaries and recommendations
+- Pet-specific insights: Personalized advice based on individual pet data
+- Health analysis: AI interpretation of patterns and trends
+- Care recommendations: Suggested actions based on pet's history
+
+📤 Export & Sharing
+- CSV export: Generate comprehensive reports for veterinarians
+- Date range filtering: Export specific time periods
+- Vet-ready reports: Professional formatting for veterinary visits
+- Data portability: Easy data export and backup
+
+👥 Social Features
+- Pet owner connections: Connect with other pet parents
+- Experience sharing: Share pet care experiences and tips
+- Community features: Social interaction around pet care
+- Multi-pet household support: Manage pets across family members
+
+📱 Mobile & Responsive Design
+- Mobile-friendly: Optimized for all device sizes
+- Responsive layout: Works perfectly on phones, tablets, and desktops
+- Touch-friendly interface: Easy mobile interaction
+- Offline capability: Core features work without internet
+
+🔐 Security & Authentication
+- Google OAuth: Secure authentication with Google accounts
+- JWT tokens: Secure session management
+- Admin system: Enhanced admin security with dedicated admin table
+- Data privacy: Secure storage and transmission of pet data
+- User management: Account creation, deletion, and management
+
+⚙️ Advanced Features
+- Demo mode: Try the app without creating an account
+- Settings management: Customize app preferences
+- Data persistence: Reliable data storage and retrieval
+- API integration: RESTful API for all functionality
+- Database management: PostgreSQL with proper relationships
+
+Technical Architecture
+
+Frontend (Next.js)
+- Next.js 14 with App Router
+- TypeScript for type safety
+- Redux Toolkit for state management
+- Tailwind CSS for styling
+- Framer Motion for animations
+- Prisma for database ORM
+
+Backend (Python FastAPI)
+- FastAPI for modern API development
+- PostgreSQL database
+- SQLAlchemy ORM
+- JWT authentication
+- OpenAI API integration
+- Docker containerization
+
+Available Pages/Routes
+- / - Landing page with features and pricing
+- /dashboard - Main dashboard with pet overview
+- /journal - Digital journal for detailed entries
+- /quick-log - One-tap activity logging
+- /analytics - Health trends and charts
+- /reminders - Reminder management
+- /ai-assistant - AI-powered insights
+- /social - Community features
+- /export - Data export functionality
+- /settings - User preferences
+- /admin - Admin panel (admin users only)
+
+For Your AI Agent - Response Guidelines
+
+When users ask about features NOT in the app, respond professionally with:
+"That's a great suggestion! While Crittr currently focuses on [current features], we're continuously working to expand our platform. Features like [requested feature] are on our development roadmap and may be available in future updates. In the meantime, Crittr excels at [relevant current features that might help with their needs]."
+
+Examples:
+- Vet integration: "While we don't currently have direct veterinary integration, Crittr's export features allow you to generate comprehensive reports for your vet visits."
+- Pet insurance: "Pet insurance integration isn't available yet, but our health tracking and analytics can help document your pet's health history for insurance purposes."
+- Mobile app: "We're working on a dedicated mobile app! For now, Crittr works great on mobile browsers with our responsive design."
+
+This gives users confidence in the current features while professionally managing expectations for future development.

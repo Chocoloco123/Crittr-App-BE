@@ -41,7 +41,7 @@ services:
       SMTP_USERNAME: your-email@gmail.com
       SMTP_PASSWORD: your-app-password
       SMTP_FROM_EMAIL: noreply@crittr.app
-      OPENAI_API_KEY: your-openai-api-key
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
       FRONTEND_URL: http://localhost:3000
       ENVIRONMENT: development
     ports:
@@ -59,7 +59,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-
   # Redis for caching and sessions (optional)
   redis:
     image: redis:7-alpine
@@ -82,3 +81,4 @@ volumes:
 networks:
   crittr-network:
     driver: bridge
+

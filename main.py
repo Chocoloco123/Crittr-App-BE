@@ -11,9 +11,13 @@ import os
 import logging
 import hashlib
 from dotenv import load_dotenv
+from openai import OpenAI
 
 # Load environment variables
 load_dotenv()
+
+# Initialize OpenAI client
+openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Configure logging
 logging.basicConfig(
@@ -309,6 +313,14 @@ class PhotoResponse(BaseModel):
     class Config:
         from_attributes = True
 
+# Chatbot models
+class QueryRequest(BaseModel):
+    query: str
+
+class QueryResponse(BaseModel):
+    response: str
+    model_used: str
+
 
 # Database dependency
 def get_db():
@@ -317,6 +329,22 @@ def get_db():
         yield db
     finally:
         db.close()
+
+# Load knowledge base for chatbot
+def load_knowledge_base():
+    """Load the knowledge base from file"""
+    try:
+        with open("knowledge.txt", "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        logger.error("Knowledge file not found")
+        return "Crittr is a pet care tracking application."
+    except Exception as e:
+        logger.error(f"Error loading knowledge base: {e}")
+        return "Crittr is a pet care tracking application."
+
+# Get knowledge base content
+KNOWLEDGE_BASE = load_knowledge_base()
 
 # Startup event
 @app.on_event("startup")
@@ -402,11 +430,72 @@ def get_current_user_optional(db: Session = Depends(get_db)):
 # Routes
 @app.get("/")
 async def root():
-    return {"message": "Crittr API", "version": "1.0.0"}
+    return {
+        "message": "Crittr API", 
+        "version": "1.0.0",
+        "description": "Backend API for Crittr - The journaling and tracking app for pet parents",
+        "chatbot": {
+            "endpoint": "/query",
+            "method": "POST",
+            "description": "AI-powered chatbot for answering questions about Crittr features",
+            "example": {
+                "request": {"query": "What features does Crittr offer?"},
+                "response": {"response": "AI-generated response", "model_used": "gpt-4o-mini"}
+            }
+        },
+        "docs": "/docs" if os.getenv("ENVIRONMENT") == "development" else "Not available in production"
+    }
 
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.utcnow()}
+
+@app.post("/query", response_model=QueryResponse)
+async def query_chatbot(request: QueryRequest):
+    """Process user query and return AI response about Crittr features"""
+    try:
+        # Prepare the prompt with knowledge base context
+        system_prompt = f"""You are a helpful AI assistant for Crittr, a pet care tracking application. 
+        
+Use the following information about Crittr to answer user questions accurately and helpfully:
+
+{KNOWLEDGE_BASE}
+
+Guidelines for responses:
+1. Be friendly and helpful
+2. Focus on Crittr's current features
+3. If asked about features not available, use the response guidelines provided in the knowledge base
+4. Keep responses concise but informative
+5. Always be professional and encouraging
+
+Answer the user's question based on the information provided above."""
+
+        # Make API call to OpenAI
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": request.query}
+            ],
+            max_tokens=500,
+            temperature=0.7
+        )
+        
+        ai_response = response.choices[0].message.content
+        
+        logger.info(f"Chatbot query processed successfully: {request.query[:50]}...")
+        
+        return QueryResponse(
+            response=ai_response,
+            model_used="gpt-4o-mini"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error processing chatbot query: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing query: {str(e)}"
+        )
 
 # Authentication routes
 
