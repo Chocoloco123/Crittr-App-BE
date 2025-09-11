@@ -51,7 +51,7 @@ app = FastAPI(
 frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[frontend_url, "http://localhost:3000", "https://crittr.vercel.app"],
+    allow_origins=[frontend_url, "http://localhost:3000", "https://critter-app.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
