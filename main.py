@@ -1,6 +1,8 @@
-from fastapi import FastAPI, HTTPException, Depends, status, Request
+from fastapi import FastAPI, HTTPException, Depends, status, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Float, ARRAY, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
@@ -10,6 +12,9 @@ from typing import Optional, List
 import os
 import logging
 import hashlib
+import uuid
+import shutil
+from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -27,7 +32,26 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Database configuration
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/crittr")
+# Railway and some providers use postgres:// but SQLAlchemy requires postgresql://
+_raw_db_url = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/crittr")
+if _raw_db_url.startswith("postgres://"):
+    _raw_db_url = "postgresql://" + _raw_db_url[len("postgres://"):]
+DATABASE_URL = _raw_db_url
+
+# File upload configuration
+UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+# Create subdirectories for different file types
+(UPLOAD_DIR / "images").mkdir(exist_ok=True)
+(UPLOAD_DIR / "videos").mkdir(exist_ok=True)
+(UPLOAD_DIR / "documents").mkdir(exist_ok=True)
+
+# Allowed file types
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"}
+ALLOWED_VIDEO_TYPES = {"video/mp4", "video/webm", "video/ogg", "video/avi", "video/mov"}
+ALLOWED_DOCUMENT_TYPES = {"application/pdf", "text/plain", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 JWT_SECRET = os.getenv("JWT_SECRET", "your-super-secret-jwt-key-change-in-production")
 engine = create_engine(
     DATABASE_URL,
@@ -46,6 +70,9 @@ app = FastAPI(
     docs_url="/docs" if os.getenv("ENVIRONMENT") == "development" else None,
     redoc_url="/redoc" if os.getenv("ENVIRONMENT") == "development" else None
 )
+
+# Mount static files for uploaded files
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # CORS middleware
 frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
@@ -114,7 +141,6 @@ class JournalEntry(Base):
     entry_type = Column(String, nullable=False)  # general, feeding, etc.
     date = Column(DateTime, nullable=False)
     time = Column(String, nullable=True)
-    attachments = Column(ARRAY(String), nullable=True)  # Array of file paths
     tags = Column(ARRAY(String), nullable=True)  # Array of tags
     pet_id = Column(Integer, ForeignKey("pets.id"), nullable=False)
     user_id = Column(String, ForeignKey("users.id"), nullable=False)
@@ -124,6 +150,67 @@ class JournalEntry(Base):
     # Relationships
     pet = relationship("Pet", back_populates="journal_entries")
     user = relationship("User", back_populates="journal_entries")
+    attachments = relationship("JournalAttachment", back_populates="journal_entry", cascade="all, delete-orphan")
+
+class JournalAttachment(Base):
+    __tablename__ = "journal_attachments"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    filename = Column(String, nullable=False)
+    original_filename = Column(String, nullable=False)
+    file_path = Column(String, nullable=False)
+    file_type = Column(String, nullable=False)  # image, video, document
+    mime_type = Column(String, nullable=False)
+    file_size = Column(Integer, nullable=False)
+    journal_entry_id = Column(Integer, ForeignKey("journal_entries.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    journal_entry = relationship("JournalEntry", back_populates="attachments")
+    user = relationship("User")
+
+class PhotoAlbum(Base):
+    __tablename__ = "photo_albums"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    cover_photo_id = Column(Integer, ForeignKey("photos.id"), nullable=True)
+    pet_id = Column(Integer, ForeignKey("pets.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    is_public = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    pet = relationship("Pet")
+    user = relationship("User")
+    photos = relationship("Photo", back_populates="album", cascade="all, delete-orphan")
+    cover_photo = relationship("Photo", foreign_keys=[cover_photo_id])
+
+class Photo(Base):
+    __tablename__ = "photos"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    filename = Column(String, nullable=False)
+    original_filename = Column(String, nullable=False)
+    file_path = Column(String, nullable=False)
+    mime_type = Column(String, nullable=False)
+    file_size = Column(Integer, nullable=False)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
+    album_id = Column(Integer, ForeignKey("photo_albums.id"), nullable=False)
+    pet_id = Column(Integer, ForeignKey("pets.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    caption = Column(Text, nullable=True)
+    tags = Column(ARRAY(String), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    album = relationship("PhotoAlbum", back_populates="photos")
+    pet = relationship("Pet")
+    user = relationship("User")
 
 class QuickLog(Base):
     __tablename__ = "quick_logs"
@@ -220,13 +307,80 @@ class PetResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class JournalAttachmentResponse(BaseModel):
+    id: int
+    filename: str
+    original_filename: str
+    file_path: str
+    file_type: str
+    mime_type: str
+    file_size: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class PhotoResponse(BaseModel):
+    id: int
+    filename: str
+    original_filename: str
+    file_path: str
+    mime_type: str
+    file_size: int
+    width: Optional[int] = None
+    height: Optional[int] = None
+    caption: Optional[str] = None
+    tags: Optional[List[str]] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class PhotoAlbumResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    cover_photo_id: Optional[int] = None
+    pet_id: int
+    user_id: str
+    is_public: bool
+    created_at: datetime
+    updated_at: datetime
+    photos: List[PhotoResponse] = []
+    photo_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+class PhotoAlbumCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    pet_id: int
+    is_public: bool = False
+
+class PhotoUploadResponse(BaseModel):
+    id: int
+    filename: str
+    original_filename: str
+    file_path: str
+    mime_type: str
+    file_size: int
+    width: Optional[int] = None
+    height: Optional[int] = None
+    album_id: int
+    pet_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 class JournalEntryCreate(BaseModel):
     title: str
     content: str
     entry_type: str
     date: datetime
     time: Optional[str] = None
-    attachments: Optional[List[str]] = None
+    # attachments: Optional[List[str]] = None  # Removed - now handled by JournalAttachment model
     tags: Optional[List[str]] = None
     pet_id: int
 
@@ -237,7 +391,7 @@ class JournalEntryResponse(BaseModel):
     entry_type: str
     date: datetime
     time: Optional[str]
-    attachments: Optional[List[str]]
+    attachments: List["JournalAttachmentResponse"] = []
     tags: Optional[List[str]]
     pet_id: int
     user_id: int
@@ -870,6 +1024,346 @@ async def delete_photo(photo_id: int, current_user: User = Depends(get_current_u
     db.commit()
     return {"message": "Photo deleted successfully"}
 
+# File upload utility functions
+def get_file_type(mime_type: str) -> str:
+    """Determine file type based on MIME type"""
+    if mime_type in ALLOWED_IMAGE_TYPES:
+        return "image"
+    elif mime_type in ALLOWED_VIDEO_TYPES:
+        return "video"
+    elif mime_type in ALLOWED_DOCUMENT_TYPES:
+        return "document"
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {mime_type}")
+
+def validate_file(file: UploadFile) -> None:
+    """Validate uploaded file"""
+    if file.size and file.size > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="File too large")
+    
+    if file.content_type not in ALLOWED_IMAGE_TYPES | ALLOWED_VIDEO_TYPES | ALLOWED_DOCUMENT_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.content_type}")
+
+def save_uploaded_file(file: UploadFile, user_id: str) -> tuple[str, str]:
+    """Save uploaded file and return (file_path, filename)"""
+    file_type = get_file_type(file.content_type)
+    
+    # Generate unique filename
+    file_extension = Path(file.filename).suffix
+    unique_filename = f"{uuid.uuid4()}{file_extension}"
+    
+    # Determine upload directory
+    upload_subdir = UPLOAD_DIR / file_type / user_id
+    upload_subdir.mkdir(parents=True, exist_ok=True)
+    
+    # Save file
+    file_path = upload_subdir / unique_filename
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    return str(file_path), unique_filename
+
+# File upload routes
+@app.post("/upload/journal-attachment/")
+async def upload_journal_attachment(
+    file: UploadFile = File(...),
+    journal_entry_id: int = Form(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Upload an attachment for a journal entry"""
+    try:
+        # Validate file
+        validate_file(file)
+        
+        # Verify journal entry belongs to user
+        journal_entry = db.query(JournalEntry).filter(
+            JournalEntry.id == journal_entry_id,
+            JournalEntry.user_id == current_user.id
+        ).first()
+        
+        if not journal_entry:
+            raise HTTPException(status_code=404, detail="Journal entry not found")
+        
+        # Save file
+        file_path, filename = save_uploaded_file(file, current_user.id)
+        
+        # Create attachment record
+        attachment = JournalAttachment(
+            filename=filename,
+            original_filename=file.filename,
+            file_path=file_path,
+            file_type=get_file_type(file.content_type),
+            mime_type=file.content_type,
+            file_size=file.size or 0,
+            journal_entry_id=journal_entry_id,
+            user_id=current_user.id
+        )
+        
+        db.add(attachment)
+        db.commit()
+        db.refresh(attachment)
+        
+        return JournalAttachmentResponse.from_orm(attachment)
+        
+    except Exception as e:
+        logger.error(f"Error uploading file: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to upload file")
+
+@app.get("/uploads/{file_type}/{user_id}/{filename}")
+async def get_uploaded_file(file_type: str, user_id: str, filename: str):
+    """Serve uploaded files"""
+    file_path = UPLOAD_DIR / file_type / user_id / filename
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    return FileResponse(file_path)
+
+@app.delete("/journal-attachments/{attachment_id}")
+async def delete_journal_attachment(
+    attachment_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a journal attachment"""
+    attachment = db.query(JournalAttachment).filter(
+        JournalAttachment.id == attachment_id,
+        JournalAttachment.user_id == current_user.id
+    ).first()
+    
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    
+    # Delete file from filesystem
+    try:
+        file_path = Path(attachment.file_path)
+        if file_path.exists():
+            file_path.unlink()
+    except Exception as e:
+        logger.warning(f"Failed to delete file {attachment.file_path}: {str(e)}")
+    
+    # Delete from database
+    db.delete(attachment)
+    db.commit()
+    
+    return {"message": "Attachment deleted successfully"}
+
+# Photo Album routes
+@app.post("/photo-albums/", response_model=PhotoAlbumResponse)
+async def create_photo_album(
+    album: PhotoAlbumCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create a new photo album"""
+    # Verify pet belongs to user
+    pet = db.query(Pet).filter(Pet.id == album.pet_id, Pet.owner_id == current_user.id).first()
+    if not pet:
+        raise HTTPException(status_code=404, detail="Pet not found")
+    
+    db_album = PhotoAlbum(
+        name=album.name,
+        description=album.description,
+        pet_id=album.pet_id,
+        user_id=current_user.id,
+        is_public=album.is_public
+    )
+    
+    db.add(db_album)
+    db.commit()
+    db.refresh(db_album)
+    
+    return PhotoAlbumResponse.from_orm(db_album)
+
+@app.get("/photo-albums/", response_model=List[PhotoAlbumResponse])
+async def get_photo_albums(
+    pet_id: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all photo albums for the user"""
+    query = db.query(PhotoAlbum).filter(PhotoAlbum.user_id == current_user.id)
+    
+    if pet_id:
+        query = query.filter(PhotoAlbum.pet_id == pet_id)
+    
+    albums = query.order_by(PhotoAlbum.created_at.desc()).all()
+    
+    # Convert to response models with photo counts
+    result = []
+    for album in albums:
+        album_dict = {
+            "id": album.id,
+            "name": album.name,
+            "description": album.description,
+            "cover_photo_id": album.cover_photo_id,
+            "pet_id": album.pet_id,
+            "user_id": album.user_id,
+            "is_public": album.is_public,
+            "created_at": album.created_at,
+            "updated_at": album.updated_at,
+            "photos": [PhotoResponse.from_orm(photo) for photo in album.photos],
+            "photo_count": len(album.photos)
+        }
+        result.append(PhotoAlbumResponse(**album_dict))
+    
+    return result
+
+@app.get("/photo-albums/{album_id}", response_model=PhotoAlbumResponse)
+async def get_photo_album(
+    album_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get a specific photo album with all photos"""
+    album = db.query(PhotoAlbum).filter(
+        PhotoAlbum.id == album_id,
+        PhotoAlbum.user_id == current_user.id
+    ).first()
+    
+    if not album:
+        raise HTTPException(status_code=404, detail="Photo album not found")
+    
+    album_dict = {
+        "id": album.id,
+        "name": album.name,
+        "description": album.description,
+        "cover_photo_id": album.cover_photo_id,
+        "pet_id": album.pet_id,
+        "user_id": album.user_id,
+        "is_public": album.is_public,
+        "created_at": album.created_at,
+        "updated_at": album.updated_at,
+        "photos": [PhotoResponse.from_orm(photo) for photo in album.photos],
+        "photo_count": len(album.photos)
+    }
+    
+    return PhotoAlbumResponse(**album_dict)
+
+@app.post("/photo-albums/{album_id}/photos/", response_model=PhotoUploadResponse)
+async def upload_photo_to_album(
+    album_id: int,
+    file: UploadFile = File(...),
+    caption: Optional[str] = Form(None),
+    tags: Optional[str] = Form(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Upload a photo to a specific album"""
+    # Verify album belongs to user
+    album = db.query(PhotoAlbum).filter(
+        PhotoAlbum.id == album_id,
+        PhotoAlbum.user_id == current_user.id
+    ).first()
+    
+    if not album:
+        raise HTTPException(status_code=404, detail="Photo album not found")
+    
+    # Validate file
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.content_type}")
+    
+    if file.size and file.size > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="File too large")
+    
+    try:
+        # Save file
+        file_path, filename = save_uploaded_file(file, current_user.id)
+        
+        # Parse tags if provided
+        tag_list = []
+        if tags:
+            tag_list = [tag.strip() for tag in tags.split(',') if tag.strip()]
+        
+        # Create photo record
+        photo = Photo(
+            filename=filename,
+            original_filename=file.filename,
+            file_path=file_path,
+            mime_type=file.content_type,
+            file_size=file.size or 0,
+            album_id=album_id,
+            pet_id=album.pet_id,
+            user_id=current_user.id,
+            caption=caption,
+            tags=tag_list
+        )
+        
+        db.add(photo)
+        db.commit()
+        db.refresh(photo)
+        
+        # Set as cover photo if it's the first photo in the album
+        if not album.cover_photo_id:
+            album.cover_photo_id = photo.id
+            db.commit()
+        
+        return PhotoUploadResponse.from_orm(photo)
+        
+    except Exception as e:
+        logger.error(f"Error uploading photo: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to upload photo")
+
+@app.delete("/photo-albums/{album_id}")
+async def delete_photo_album(
+    album_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a photo album and all its photos"""
+    album = db.query(PhotoAlbum).filter(
+        PhotoAlbum.id == album_id,
+        PhotoAlbum.user_id == current_user.id
+    ).first()
+    
+    if not album:
+        raise HTTPException(status_code=404, detail="Photo album not found")
+    
+    # Delete all photos from filesystem
+    for photo in album.photos:
+        try:
+            file_path = Path(photo.file_path)
+            if file_path.exists():
+                file_path.unlink()
+        except Exception as e:
+            logger.warning(f"Failed to delete file {photo.file_path}: {str(e)}")
+    
+    # Delete album (photos will be deleted due to cascade)
+    db.delete(album)
+    db.commit()
+    
+    return {"message": "Photo album deleted successfully"}
+
+@app.delete("/photos/{photo_id}")
+async def delete_photo(
+    photo_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a specific photo"""
+    photo = db.query(Photo).filter(
+        Photo.id == photo_id,
+        Photo.user_id == current_user.id
+    ).first()
+    
+    if not photo:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    
+    # Delete file from filesystem
+    try:
+        file_path = Path(photo.file_path)
+        if file_path.exists():
+            file_path.unlink()
+    except Exception as e:
+        logger.warning(f"Failed to delete file {photo.file_path}: {str(e)}")
+    
+    # Delete photo
+    db.delete(photo)
+    db.commit()
+    
+    return {"message": "Photo deleted successfully"}
+
 # Journal Entry routes
 @app.post("/journal-entries/", response_model=JournalEntryResponse)
 async def create_journal_entry(entry: JournalEntryCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -895,7 +1389,27 @@ async def get_journal_entries(pet_id: Optional[int] = None, current_user: User =
         query = query.filter(JournalEntry.pet_id == pet_id)
     
     entries = query.order_by(JournalEntry.date.desc()).all()
-    return entries
+    
+    # Convert to response models with attachments
+    result = []
+    for entry in entries:
+        entry_dict = {
+            "id": entry.id,
+            "title": entry.title,
+            "content": entry.content,
+            "entry_type": entry.entry_type,
+            "date": entry.date,
+            "time": entry.time,
+            "tags": entry.tags,
+            "pet_id": entry.pet_id,
+            "user_id": entry.user_id,
+            "created_at": entry.created_at,
+            "updated_at": entry.updated_at,
+            "attachments": [JournalAttachmentResponse.from_orm(att) for att in entry.attachments]
+        }
+        result.append(JournalEntryResponse(**entry_dict))
+    
+    return result
 
 @app.get("/journal-entries/{entry_id}", response_model=JournalEntryResponse)
 async def get_journal_entry(entry_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -910,7 +1424,23 @@ async def get_journal_entry(entry_id: int, current_user: User = Depends(get_curr
             detail="Journal entry not found"
         )
     
-    return entry
+    # Convert to response model with attachments
+    entry_dict = {
+        "id": entry.id,
+        "title": entry.title,
+        "content": entry.content,
+        "entry_type": entry.entry_type,
+        "date": entry.date,
+        "time": entry.time,
+        "tags": entry.tags,
+        "pet_id": entry.pet_id,
+        "user_id": entry.user_id,
+        "created_at": entry.created_at,
+        "updated_at": entry.updated_at,
+        "attachments": [JournalAttachmentResponse.from_orm(att) for att in entry.attachments]
+    }
+    
+    return JournalEntryResponse(**entry_dict)
 
 # Quick Log routes
 @app.post("/quick-logs/", response_model=QuickLogResponse)
