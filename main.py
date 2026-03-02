@@ -38,6 +38,20 @@ if _raw_db_url.startswith("postgres://"):
     _raw_db_url = "postgresql://" + _raw_db_url[len("postgres://"):]
 DATABASE_URL = _raw_db_url
 
+
+def _redact_db_url(url: str) -> str:
+    """Redact password in URL for safe logging."""
+    try:
+        from urllib.parse import urlparse, urlunparse
+        p = urlparse(url)
+        if p.username and "@" in p.netloc:
+            netloc = f"{p.username}:****@{p.netloc.split('@')[-1]}"
+        else:
+            netloc = p.netloc
+        return urlunparse((p.scheme, netloc, p.path or "", "", "", ""))
+    except Exception:
+        return "***"
+
 # File upload configuration
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -67,6 +81,7 @@ Base = declarative_base()
 async def lifespan(app: FastAPI):
     """Startup: create DB tables. Shutdown: log."""
     logger.info("Starting Crittr API...")
+    logger.info("DATABASE_URL (redacted): %s", _redact_db_url(DATABASE_URL))
     try:
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables created successfully")
@@ -106,7 +121,7 @@ security = HTTPBearer()
 # Database Models
 class User(Base):
     __tablename__ = "users"
-    
+
     id = Column(String, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, nullable=True)
@@ -116,7 +131,7 @@ class User(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     email_verified = Column(DateTime, nullable=True)
     image = Column(String, nullable=True)
-    
+
     # Relationships
     pets = relationship("Pet", back_populates="owner")
     journal_entries = relationship("JournalEntry", back_populates="user")
