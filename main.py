@@ -4,9 +4,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Float, ARRAY, JSON
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session, relationship
-from pydantic import BaseModel, EmailStr
+from sqlalchemy.orm import sessionmaker, Session, relationship, declarative_base
+from pydantic import BaseModel, EmailStr, ConfigDict
 from datetime import datetime, timedelta
 from typing import Optional, List
 import os
@@ -15,6 +14,7 @@ import hashlib
 import uuid
 import shutil
 from pathlib import Path
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -62,13 +62,29 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup: create DB tables. Shutdown: log."""
+    logger.info("Starting Crittr API...")
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables created successfully")
+    except Exception as e:
+        logger.error(f"Error creating database tables: {e}")
+        raise
+    yield
+    logger.info("Shutting down Crittr API...")
+
+
 # Create FastAPI app
 app = FastAPI(
     title="Crittr API",
     description="Backend API for Crittr - The journaling and tracking app for pet parents",
     version="1.0.0",
     docs_url="/docs" if os.getenv("ENVIRONMENT") == "development" else None,
-    redoc_url="/redoc" if os.getenv("ENVIRONMENT") == "development" else None
+    redoc_url="/redoc" if os.getenv("ENVIRONMENT") == "development" else None,
+    lifespan=lifespan,
 )
 
 # Mount static files for uploaded files
@@ -271,8 +287,7 @@ class UserResponse(BaseModel):
     is_active: bool
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class PetCreate(BaseModel):
     name: str
@@ -304,8 +319,7 @@ class PetResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class JournalAttachmentResponse(BaseModel):
     id: int
@@ -317,8 +331,7 @@ class JournalAttachmentResponse(BaseModel):
     file_size: int
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class PhotoResponse(BaseModel):
     id: int
@@ -333,8 +346,7 @@ class PhotoResponse(BaseModel):
     tags: Optional[List[str]] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class PhotoAlbumResponse(BaseModel):
     id: int
@@ -349,8 +361,7 @@ class PhotoAlbumResponse(BaseModel):
     photos: List[PhotoResponse] = []
     photo_count: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class PhotoAlbumCreate(BaseModel):
     name: str
@@ -371,8 +382,7 @@ class PhotoUploadResponse(BaseModel):
     pet_id: int
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class JournalEntryCreate(BaseModel):
     title: str
@@ -398,8 +408,7 @@ class JournalEntryResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class QuickLogCreate(BaseModel):
     activity: str
@@ -414,8 +423,7 @@ class QuickLogResponse(BaseModel):
     pet_id: int
     user_id: int
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class PhotoAlbumCreate(BaseModel):
     name: str
@@ -431,8 +439,7 @@ class PhotoAlbumResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class PhotoCreate(BaseModel):
     filename: str
@@ -464,8 +471,7 @@ class PhotoResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # Chatbot models
 class QueryRequest(BaseModel):
@@ -499,24 +505,6 @@ def load_knowledge_base():
 
 # Get knowledge base content
 KNOWLEDGE_BASE = load_knowledge_base()
-
-# Startup event
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Starting Crittr API...")
-    try:
-        # Create tables
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables created successfully")
-    except Exception as e:
-        logger.error(f"Error creating database tables: {e}")
-        raise
-
-# Shutdown event
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("Shutting down Crittr API...")
-
 
 
 # Admin check function with enhanced security
@@ -1104,7 +1092,7 @@ async def upload_journal_attachment(
         db.commit()
         db.refresh(attachment)
         
-        return JournalAttachmentResponse.from_orm(attachment)
+        return JournalAttachmentResponse.model_validate(attachment)
         
     except Exception as e:
         logger.error(f"Error uploading file: {str(e)}")
@@ -1174,7 +1162,7 @@ async def create_photo_album(
     db.commit()
     db.refresh(db_album)
     
-    return PhotoAlbumResponse.from_orm(db_album)
+    return PhotoAlbumResponse.model_validate(db_album)
 
 @app.get("/photo-albums/", response_model=List[PhotoAlbumResponse])
 async def get_photo_albums(
@@ -1203,7 +1191,7 @@ async def get_photo_albums(
             "is_public": album.is_public,
             "created_at": album.created_at,
             "updated_at": album.updated_at,
-            "photos": [PhotoResponse.from_orm(photo) for photo in album.photos],
+            "photos": [PhotoResponse.model_validate(photo) for photo in album.photos],
             "photo_count": len(album.photos)
         }
         result.append(PhotoAlbumResponse(**album_dict))
@@ -1235,7 +1223,7 @@ async def get_photo_album(
         "is_public": album.is_public,
         "created_at": album.created_at,
         "updated_at": album.updated_at,
-        "photos": [PhotoResponse.from_orm(photo) for photo in album.photos],
+        "photos": [PhotoResponse.model_validate(photo) for photo in album.photos],
         "photo_count": len(album.photos)
     }
     
@@ -1299,7 +1287,7 @@ async def upload_photo_to_album(
             album.cover_photo_id = photo.id
             db.commit()
         
-        return PhotoUploadResponse.from_orm(photo)
+        return PhotoUploadResponse.model_validate(photo)
         
     except Exception as e:
         logger.error(f"Error uploading photo: {str(e)}")
@@ -1405,7 +1393,7 @@ async def get_journal_entries(pet_id: Optional[int] = None, current_user: User =
             "user_id": entry.user_id,
             "created_at": entry.created_at,
             "updated_at": entry.updated_at,
-            "attachments": [JournalAttachmentResponse.from_orm(att) for att in entry.attachments]
+            "attachments": [JournalAttachmentResponse.model_validate(att) for att in entry.attachments]
         }
         result.append(JournalEntryResponse(**entry_dict))
     
@@ -1437,7 +1425,7 @@ async def get_journal_entry(entry_id: int, current_user: User = Depends(get_curr
         "user_id": entry.user_id,
         "created_at": entry.created_at,
         "updated_at": entry.updated_at,
-        "attachments": [JournalAttachmentResponse.from_orm(att) for att in entry.attachments]
+        "attachments": [JournalAttachmentResponse.model_validate(att) for att in entry.attachments]
     }
     
     return JournalEntryResponse(**entry_dict)
